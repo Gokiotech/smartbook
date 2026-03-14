@@ -1,0 +1,329 @@
+{
+  "name": "Randevu Sistemi - Tam Workflow",
+  "nodes": [
+    {
+      "parameters": {
+        "pollTimes": {
+          "item": [{ "mode": "everyMinute" }]
+        },
+        "documentId": { "__rl": true, "mode": "id", "value": "SHEETS_DOCUMENT_ID" },
+        "sheetName": { "__rl": true, "mode": "name", "value": "Randevular" },
+        "event": "rowAdded"
+      },
+      "id": "node_sheets_trigger",
+      "name": "1. Yeni Randevu Geldi",
+      "type": "n8n-nodes-base.googleSheetsTrigger",
+      "typeVersion": 1,
+      "position": [240, 60],
+      "notes": "Google Sheets'e yeni satır eklenince tetiklenir"
+    },
+    {
+      "parameters": {
+        "resource": "message",
+        "operation": "create",
+        "from": "whatsapp:+TWILIO_WHATSAPP_NUMBER",
+        "to": "=whatsapp:+{{$json['Telefon']}}",
+        "body": "=Merhaba {{$json['Ad']}}! 👋\n\nRandevunuz başarıyla oluşturuldu.\n\n📅 Tarih: {{$json['Tarih']}}\n🕐 Saat: {{$json['Saat']}}\n\nGörüşmek üzere!"
+      },
+      "id": "node_whatsapp_onay",
+      "name": "2. Onay Mesajı Gönder",
+      "type": "n8n-nodes-base.twilio",
+      "typeVersion": 1,
+      "position": [240, 220],
+      "credentials": {
+        "twilioApi": {
+          "id": "TWILIO_CREDENTIAL_ID",
+          "name": "Twilio Account"
+        }
+      },
+      "notes": "Müşteriye randevu onay mesajı gider"
+    },
+    {
+      "parameters": {
+        "amount": 1,
+        "unit": "days",
+        "resume": "atSpecifiedTime",
+        "resumeTime": "={{ DateTime.fromISO($json['Tarih'] + 'T09:00:00').minus({days: 1}).toISO() }}"
+      },
+      "id": "node_wait",
+      "name": "3. 1 Gün Önceye Kadar Bekle",
+      "type": "n8n-nodes-base.wait",
+      "typeVersion": 1,
+      "position": [240, 380],
+      "notes": "Randevudan 1 gün öncesine kadar bekler"
+    },
+    {
+      "parameters": {
+        "resource": "message",
+        "operation": "create",
+        "from": "whatsapp:+TWILIO_WHATSAPP_NUMBER",
+        "to": "=whatsapp:+{{$json['Telefon']}}",
+        "body": "=Merhaba {{$json['Ad']}}! 👋\n\nYarın randevunuz var.\n\n📅 Tarih: {{$json['Tarih']}}\n🕐 Saat: {{$json['Saat']}}\n\nLütfen aşağıdan onaylayın:\n✅ Evet: {{$env.WEBHOOK_BASE_URL}}/webhook/randevu-evet?id={{$json['ID']}}\n❌ Hayır: {{$env.WEBHOOK_BASE_URL}}/webhook/randevu-hayir?id={{$json['ID']}}"
+      },
+      "id": "node_whatsapp_hatirlatma",
+      "name": "4. Hatırlatma Mesajı Gönder",
+      "type": "n8n-nodes-base.twilio",
+      "typeVersion": 1,
+      "position": [240, 540],
+      "credentials": {
+        "twilioApi": {
+          "id": "TWILIO_CREDENTIAL_ID",
+          "name": "Twilio Account"
+        }
+      },
+      "notes": "Evet/Hayır linkleri içeren hatırlatma mesajı"
+    },
+    {
+      "parameters": {
+        "httpMethod": "GET",
+        "path": "randevu-evet",
+        "responseMode": "lastNode",
+        "responseData": "firstEntryJson"
+      },
+      "id": "node_webhook_evet",
+      "name": "5a. Webhook — Evet",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 1,
+      "position": [60, 700],
+      "webhookId": "randevu-evet",
+      "notes": "Müşteri Evet linkine tıklayınca burası tetiklenir"
+    },
+    {
+      "parameters": {
+        "httpMethod": "GET",
+        "path": "randevu-hayir",
+        "responseMode": "lastNode",
+        "responseData": "firstEntryJson"
+      },
+      "id": "node_webhook_hayir",
+      "name": "5b. Webhook — Hayır",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 1,
+      "position": [420, 700],
+      "webhookId": "randevu-hayir",
+      "notes": "Müşteri Hayır linkine tıklayınca burası tetiklenir"
+    },
+    {
+      "parameters": {
+        "operation": "update",
+        "documentId": { "__rl": true, "mode": "id", "value": "SHEETS_DOCUMENT_ID" },
+        "sheetName": { "__rl": true, "mode": "name", "value": "Randevular" },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "ID": "={{$json['query']['id']}}",
+            "Durum": "Onaylandı"
+          }
+        },
+        "where": {
+          "values": [{ "lookupColumn": "ID", "lookupValue": "={{$json['query']['id']}}" }]
+        }
+      },
+      "id": "node_sheets_onayla",
+      "name": "6a. Sheets — Onaylandı",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4,
+      "position": [60, 860],
+      "notes": "Randevu durumunu Onaylandı olarak günceller"
+    },
+    {
+      "parameters": {
+        "operation": "update",
+        "documentId": { "__rl": true, "mode": "id", "value": "SHEETS_DOCUMENT_ID" },
+        "sheetName": { "__rl": true, "mode": "name", "value": "Randevular" },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "ID": "={{$json['query']['id']}}",
+            "Durum": "İptal"
+          }
+        },
+        "where": {
+          "values": [{ "lookupColumn": "ID", "lookupValue": "={{$json['query']['id']}}" }]
+        }
+      },
+      "id": "node_sheets_iptal",
+      "name": "6b. Sheets — İptal",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4,
+      "position": [420, 860],
+      "notes": "Randevu durumunu İptal olarak günceller"
+    },
+    {
+      "parameters": {
+        "operation": "read",
+        "documentId": { "__rl": true, "mode": "id", "value": "SHEETS_DOCUMENT_ID" },
+        "sheetName": { "__rl": true, "mode": "name", "value": "Bekleme Listesi" },
+        "filters": {
+          "conditions": [{ "keyName": "Durum", "condition": "eq", "keyValue": "Bekliyor" }]
+        },
+        "limit": 1
+      },
+      "id": "node_sheets_bekleme",
+      "name": "7. Bekleme Listesinden Al",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4,
+      "position": [420, 1020],
+      "notes": "İptal sonrası bekleyen ilk hastayı çeker"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": { "caseSensitive": false },
+          "conditions": [
+            {
+              "leftValue": "={{$json.length}}",
+              "rightValue": 0,
+              "operator": { "type": "number", "operation": "gt" }
+            }
+          ]
+        }
+      },
+      "id": "node_if_bekleme",
+      "name": "8. Bekleyen Hasta Var mı?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [420, 1180],
+      "notes": "Bekleme listesi boşsa workflow durur"
+    },
+    {
+      "parameters": {
+        "resource": "message",
+        "operation": "create",
+        "from": "whatsapp:+TWILIO_WHATSAPP_NUMBER",
+        "to": "=whatsapp:+{{$json['Telefon']}}",
+        "body": "=Merhaba {{$json['Ad']}}! 👋\n\nBugün saat {{$node['6b. Sheets — İptal']['json']['Saat']}} için randevumuzda boşluk oluştu.\n\nUygun iseniz:\n✅ Evet: {{$env.WEBHOOK_BASE_URL}}/webhook/bekleme-evet?id={{$json['ID']}}\n❌ Hayır: {{$env.WEBHOOK_BASE_URL}}/webhook/bekleme-hayir?id={{$json['ID']}}"
+      },
+      "id": "node_whatsapp_teklif",
+      "name": "9. Teklif Mesajı Gönder",
+      "type": "n8n-nodes-base.twilio",
+      "typeVersion": 1,
+      "position": [420, 1340],
+      "credentials": {
+        "twilioApi": {
+          "id": "TWILIO_CREDENTIAL_ID",
+          "name": "Twilio Account"
+        }
+      },
+      "notes": "Bekleme listesindeki hastaya boşluk teklifi gider"
+    },
+    {
+      "parameters": {
+        "httpMethod": "GET",
+        "path": "bekleme-evet",
+        "responseMode": "lastNode",
+        "responseData": "firstEntryJson"
+      },
+      "id": "node_webhook_bekleme_evet",
+      "name": "10a. Webhook — Bekleme Evet",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 1,
+      "position": [240, 1500],
+      "webhookId": "bekleme-evet"
+    },
+    {
+      "parameters": {
+        "httpMethod": "GET",
+        "path": "bekleme-hayir",
+        "responseMode": "lastNode",
+        "responseData": "firstEntryJson"
+      },
+      "id": "node_webhook_bekleme_hayir",
+      "name": "10b. Webhook — Bekleme Hayır",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 1,
+      "position": [600, 1500],
+      "webhookId": "bekleme-hayir"
+    },
+    {
+      "parameters": {
+        "operation": "update",
+        "documentId": { "__rl": true, "mode": "id", "value": "SHEETS_DOCUMENT_ID" },
+        "sheetName": { "__rl": true, "mode": "name", "value": "Bekleme Listesi" },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "ID": "={{$json['query']['id']}}",
+            "Durum": "Randevulandı"
+          }
+        },
+        "where": {
+          "values": [{ "lookupColumn": "ID", "lookupValue": "={{$json['query']['id']}}" }]
+        }
+      },
+      "id": "node_sheets_bekleme_onayla",
+      "name": "11a. Sheets — Randevulandı",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4,
+      "position": [240, 1660],
+      "notes": "Bekleme listesindeki kişiyi Randevulandı olarak işaretler"
+    },
+    {
+      "parameters": {
+        "operation": "update",
+        "documentId": { "__rl": true, "mode": "id", "value": "SHEETS_DOCUMENT_ID" },
+        "sheetName": { "__rl": true, "mode": "name", "value": "Bekleme Listesi" },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "ID": "={{$json['query']['id']}}",
+            "Durum": "Geçildi"
+          }
+        },
+        "where": {
+          "values": [{ "lookupColumn": "ID", "lookupValue": "={{$json['query']['id']}}" }]
+        }
+      },
+      "id": "node_sheets_bekleme_gec",
+      "name": "11b. Sheets — Geçildi",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4,
+      "position": [600, 1660],
+      "notes": "Hayır diyen kişiyi geçildi olarak işaretler, sıradaki tetiklenir"
+    }
+  ],
+  "connections": {
+    "1. Yeni Randevu Geldi": {
+      "main": [[{ "node": "2. Onay Mesajı Gönder", "type": "main", "index": 0 }]]
+    },
+    "2. Onay Mesajı Gönder": {
+      "main": [[{ "node": "3. 1 Gün Önceye Kadar Bekle", "type": "main", "index": 0 }]]
+    },
+    "3. 1 Gün Önceye Kadar Bekle": {
+      "main": [[{ "node": "4. Hatırlatma Mesajı Gönder", "type": "main", "index": 0 }]]
+    },
+    "5a. Webhook — Evet": {
+      "main": [[{ "node": "6a. Sheets — Onaylandı", "type": "main", "index": 0 }]]
+    },
+    "5b. Webhook — Hayır": {
+      "main": [[{ "node": "6b. Sheets — İptal", "type": "main", "index": 0 }]]
+    },
+    "6b. Sheets — İptal": {
+      "main": [[{ "node": "7. Bekleme Listesinden Al", "type": "main", "index": 0 }]]
+    },
+    "7. Bekleme Listesinden Al": {
+      "main": [[{ "node": "8. Bekleyen Hasta Var mı?", "type": "main", "index": 0 }]]
+    },
+    "8. Bekleyen Hasta Var mı?": {
+      "main": [
+        [{ "node": "9. Teklif Mesajı Gönder", "type": "main", "index": 0 }],
+        []
+      ]
+    },
+    "9. Teklif Mesajı Gönder": {
+      "main": [[]]
+    },
+    "10a. Webhook — Bekleme Evet": {
+      "main": [[{ "node": "11a. Sheets — Randevulandı", "type": "main", "index": 0 }]]
+    },
+    "10b. Webhook — Bekleme Hayır": {
+      "main": [[{ "node": "11b. Sheets — Geçildi", "type": "main", "index": 0 }]]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "meta": {
+    "instanceId": "randevu-sistemi-v1"
+  }
+}
